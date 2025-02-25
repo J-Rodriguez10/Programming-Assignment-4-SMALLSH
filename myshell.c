@@ -262,7 +262,7 @@ void handle_builtin(struct command_line *cmd) {
         exit(0); 
     }
 
-    // 2️⃣ Change directory command
+    // Change directory command
     if (strcmp(cmd->argv[0], "cd") == 0) {
         // Get the directory argument
         char *target = cmd->argv[1]; 
@@ -278,7 +278,7 @@ void handle_builtin(struct command_line *cmd) {
         return;
     }
 
-    // 3️⃣ Status command
+    // Status command
     if (strcmp(cmd->argv[0], "status") == 0) {
         // Print the last foreground process status
         if (last_foreground_status == 0) {
