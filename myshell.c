@@ -27,7 +27,7 @@ pid_t bg_pids[MAX_BG_PROCESSES];  // Array to store background process PIDs
 // Global flag to track foreground-only mode
 volatile sig_atomic_t foreground_only_mode = 0; 
 
-// Checks and prints for any 
+// Checks and prints recently terminated background pid
 void check_background_processes() {
     int status;
     pid_t finished_pid;
@@ -136,6 +136,7 @@ int main() {
     return EXIT_SUCCESS;
 }
 
+// Handles external commands
 void handle_external(struct command_line *cmd) {
 
     pid_t pid = fork();
@@ -234,6 +235,7 @@ void handle_external(struct command_line *cmd) {
     }
 }
 
+// Checks to see if a command is a built in command.
 int is_builtin(struct command_line *cmd) {
     // No command entered
     if (cmd->argc == 0) {
@@ -245,6 +247,7 @@ int is_builtin(struct command_line *cmd) {
             strcmp(cmd->argv[0], "status") == 0);
 }
 
+// Handles built in commands such as: "cd", "status", "exit"
 void handle_builtin(struct command_line *cmd) { 
     if (cmd->argc == 0) {
         return; // No command entered
