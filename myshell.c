@@ -212,7 +212,7 @@ void handle_external(struct command_line *cmd) {
             }
 
             // Background process: Print PID
-            printf("Background PID: %d\n", pid);
+            printf("background pid %d\n", pid);
             fflush(stdout);
         } else {  
             // Foreground process: Wait for completion
