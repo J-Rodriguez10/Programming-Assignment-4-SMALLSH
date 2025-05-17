@@ -16,147 +16,136 @@ int is_builtin(struct command_line *cmd);
 void check_background_processes();
 
 // Global Variables:
-int last_foreground_status = 0; // Keeps track of the last foreground status
-int bg_pid_count = 0;  // Keeps track of the number of background processes
-struct command_line *curr_command; // Structure that holds various info on user's command
+int last_foreground_status = 0; // Last foreground command exit/signal status
+int bg_pid_count = 0; // Number of active background processes
+struct command_line *curr_command; // Holds parsed command data
 
-// Constraints:
-#define MAX_BG_PROCESSES 100  // Max number of background processes to track
-pid_t bg_pids[MAX_BG_PROCESSES];  // Array to store background process PIDs
+// Background process tracking
+#define MAX_BG_PROCESSES 100
+pid_t bg_pids[MAX_BG_PROCESSES];
 
-// Global flag to track foreground-only mode
-volatile sig_atomic_t foreground_only_mode = 0; 
+// Foreground-only mode toggle
+volatile sig_atomic_t foreground_only_mode = 0;
 
-// Checks and prints recently terminated background pid
+/**
+ * Checks for completed background processes and reports their status.
+ */
 void check_background_processes() {
     int status;
     pid_t finished_pid;
 
-    // Check each stored background process
     for (int i = 0; i < bg_pid_count; i++) {
+        finished_pid = waitpid(bg_pids[i], &status, WNOHANG);
 
-        // Non-blocking check
-        finished_pid = waitpid(bg_pids[i], &status, WNOHANG); 
-
-        // Process has terminated
-        if (finished_pid > 0) {  
+        if (finished_pid > 0) {
             if (WIFEXITED(status)) {
                 printf("Background process %d terminated with exit status %d.\n", finished_pid, WEXITSTATUS(status));
             } else if (WIFSIGNALED(status)) {
                 printf("Background process %d terminated by signal %d.\n", finished_pid, WTERMSIG(status));
             }
-            // Prints immediately
-            fflush(stdout); 
+            fflush(stdout);
 
-            // Remove the finished process from the array
+            // Remove terminated process from array
             for (int j = i; j < bg_pid_count - 1; j++) {
                 bg_pids[j] = bg_pids[j + 1];
             }
-            bg_pid_count--;  
-            i--;  
+            bg_pid_count--;
+            i--;
         }
     }
 }
 
-// SIGTSTP Handler for Ctrl+Z (Foreground mode)
+/**
+ * Handles Ctrl+Z (SIGTSTP): Toggles foreground-only mode.
+ */
 void handle_sigtstp(int signo) {
     if (foreground_only_mode == 0) {
-        // Switch to foreground-only mode
         foreground_only_mode = 1;
         write(STDOUT_FILENO, "\nEntering foreground-only mode (& is now ignored)\n: ", 50);
     } else {
-        // Exit foreground-only mode
         foreground_only_mode = 0;
         write(STDOUT_FILENO, "\nExiting foreground-only mode\n: ", 30);
     }
-    fflush(stdout); 
+    fflush(stdout);
 }
 
-// SIGINT Handler for Ctrl+C (Interrupt)
+/**
+ * Handles Ctrl+C (SIGINT): Prints prompt if no foreground process.
+ */
 void handle_sigint(int signo) {
-    // Only print a newline if no foreground process is running
     if (curr_command == NULL) {
         write(STDOUT_FILENO, "\n", 1); 
-        write(STDOUT_FILENO, ": ", 2);  
-        fflush(stdout);  
+        write(STDOUT_FILENO, ": ", 2);
+        fflush(stdout);
     }
 }
 
-// Main loop
+/**
+ * Main loop: Parses and executes commands, handles signals and background processes.
+ */
 int main() {
     struct sigaction sa_int, sa_tstp;
 
-    // SIGINT (Ctrl+C) handler
+    // Setup SIGINT handler
     sa_int.sa_handler = handle_sigint;
-    sigfillset(&sa_int.sa_mask); // Block all signals while in handler
-    sa_int.sa_flags = SA_RESTART; // Restart interrupted syscalls
+    sigfillset(&sa_int.sa_mask);
+    sa_int.sa_flags = SA_RESTART;
     sigaction(SIGINT, &sa_int, NULL);
 
-    // SIGTSTP (Ctrl+Z) handler
+    // Setup SIGTSTP handler
     sa_tstp.sa_handler = handle_sigtstp;
     sigfillset(&sa_tstp.sa_mask);
     sa_tstp.sa_flags = SA_RESTART;
     sigaction(SIGTSTP, &sa_tstp, NULL);
 
-    while (1) {  // Infinite shell loop
-
-        // Reset curr_command to NULL to signify no active command
+    while (1) {
         curr_command = NULL;
 
-        // Check for finished background processes
-        check_background_processes();
+        check_background_processes(); // Check for finished background jobs
 
-        // Parse new input
-        curr_command = parse_input();
+        curr_command = parse_input(); // Get new command
 
-        
-        // If the command is NULL (blank line or comment), just continue the loop
+        // Skip empty or comment lines
         if (curr_command == NULL || (curr_command->argc == 0 || curr_command->argv[0][0] == '#')) {
-            free(curr_command);  // Free memory allocated by parse_input (if any)
-            continue;  // Skip to the next iteration
+            free(curr_command);
+            continue;
         }
 
-
-        // If foreground-only mode is enabled, override background execution
+        // Enforce foreground mode if set
         if (foreground_only_mode && curr_command->is_bg) {
-            curr_command->is_bg = 0;  // Force foreground execution
+            curr_command->is_bg = 0;
         }
 
-        // If the command is a built-in, handle it and skip external execution
         if (is_builtin(curr_command)) {
             handle_builtin(curr_command);
         } else {
             handle_external(curr_command);
         }
 
-        // Free allocated memory for curr_command after handling
         free(curr_command);
     }
 
     return EXIT_SUCCESS;
 }
 
-// Handles external commands
+/**
+ * Executes non-builtin commands, handles redirection and background execution.
+ */
 void handle_external(struct command_line *cmd) {
-
     pid_t pid = fork();
 
-    // FAILED FORK:
     if (pid == -1) {
         perror("fork");
         exit(1);
 
-    // CHILD PROCESS:
-    } else if (pid == 0) { 
+    } else if (pid == 0) { // Child process
         if (cmd->is_bg) {
-            // Background processes ignores SIGINT
-            signal(SIGINT, SIG_IGN); 
+            signal(SIGINT, SIG_IGN); // Ignore SIGINT in background
         } else {
-            // Foreground processes terminates on SIGINT
-            signal(SIGINT, SIG_DFL);
+            signal(SIGINT, SIG_DFL); // Terminate on SIGINT in foreground
         }
 
-        // Handle input redirection
+        // Input redirection
         if (cmd->input_file) {
             int fd = open(cmd->input_file, O_RDONLY);
             if (fd == -1) {
@@ -166,7 +155,6 @@ void handle_external(struct command_line *cmd) {
             dup2(fd, STDIN_FILENO);
             close(fd);
         } else if (cmd->is_bg) {
-            // If background process and no input file, redirect stdin to /dev/null
             int dev_null = open("/dev/null", O_RDONLY);
             if (dev_null == -1) {
                 perror("open");
@@ -176,7 +164,7 @@ void handle_external(struct command_line *cmd) {
             close(dev_null);
         }
 
-        // Handle output redirection
+        // Output redirection
         if (cmd->output_file) {
             int fd = open(cmd->output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd == -1) {
@@ -186,7 +174,6 @@ void handle_external(struct command_line *cmd) {
             dup2(fd, STDOUT_FILENO);
             close(fd);
         } else if (cmd->is_bg) {
-            // If background process and no output file, redirect stdout to /dev/null
             int dev_null = open("/dev/null", O_WRONLY);
             if (dev_null == -1) {
                 perror("open");
@@ -196,26 +183,19 @@ void handle_external(struct command_line *cmd) {
             close(dev_null);
         }
 
-        // Execute the command after updating input/output redirection
+        // Run the command
         execvp(cmd->argv[0], cmd->argv);
-        perror("execvp"); // If execvp fails, print error
+        perror("execvp");
         exit(1);
 
-    // PARENT PROCESS:
-    } else {
-
-        if (cmd->is_bg) {  
-            // Store the background process PID
-            // No waitpid(), continue on
+    } else { // Parent process
+        if (cmd->is_bg) {
             if (bg_pid_count < MAX_BG_PROCESSES) {
                 bg_pids[bg_pid_count++] = pid;
             }
-
-            // Background process: Print PID
             printf("background pid %d\n", pid);
             fflush(stdout);
-        } else {  
-            // Foreground process: Wait for completion
+        } else {
             int status;
             pid_t child_pid = waitpid(pid, &status, 0);
 
@@ -224,8 +204,6 @@ void handle_external(struct command_line *cmd) {
                     last_foreground_status = WEXITSTATUS(status);
                 } else if (WIFSIGNALED(status)) {
                     last_foreground_status = WTERMSIG(status);
-
-                    // Print the signal number if the foreground process is terminated by a signal
                     char msg[64];
                     int len = snprintf(msg, sizeof(msg), "\nterminated by signal %d\n", last_foreground_status);
                     write(STDOUT_FILENO, msg, len);
@@ -235,9 +213,10 @@ void handle_external(struct command_line *cmd) {
     }
 }
 
-// Checks to see if a command is a built in command.
+/**
+ * Returns 1 if the command is a built-in ("exit", "cd", "status").
+ */
 int is_builtin(struct command_line *cmd) {
-    // No command entered
     if (cmd->argc == 0) {
         return 0;
     }
@@ -247,40 +226,31 @@ int is_builtin(struct command_line *cmd) {
             strcmp(cmd->argv[0], "status") == 0);
 }
 
-// Handles built in commands such as: "cd", "status", "exit"
-void handle_builtin(struct command_line *cmd) { 
-    if (cmd->argc == 0) {
-        return; // No command entered
-    }
+/**
+ * Executes built-in commands: "exit", "cd", "status".
+ */
+void handle_builtin(struct command_line *cmd) {
+    if (cmd->argc == 0) return;
 
     if (strcmp(cmd->argv[0], "exit") == 0) {
-        // Kill any background processes before exiting
         for (int i = 0; i < bg_pid_count; i++) {
-            kill(bg_pids[i], SIGTERM);  
+            kill(bg_pids[i], SIGTERM); // Terminate background processes
         }
-        // Exit the shell
-        exit(0); 
+        exit(0);
     }
 
-    // Change directory command
     if (strcmp(cmd->argv[0], "cd") == 0) {
-        // Get the directory argument
-        char *target = cmd->argv[1]; 
-
-        // Default to HOME (if no path is given)
+        char *target = cmd->argv[1];
         if (target == NULL) {
             target = getenv("HOME");
         }
-
         if (chdir(target) != 0) {
-            perror("cd"); 
+            perror("cd");
         }
         return;
     }
 
-    // Status command
     if (strcmp(cmd->argv[0], "status") == 0) {
-        // Print the last foreground process status
         if (last_foreground_status == 0) {
             printf("exit value 0\n");
         } else if (WIFSIGNALED(last_foreground_status)) {
@@ -288,7 +258,7 @@ void handle_builtin(struct command_line *cmd) {
         } else {
             printf("exit value %d\n", last_foreground_status);
         }
-        fflush(stdout); 
+        fflush(stdout);
         return;
-    }  
+    }
 }

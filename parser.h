@@ -1,20 +1,29 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-#define INPUT_LENGTH 2048
-#define MAX_ARGS 512
+/**
+ * parser.h
+ * 
+ * Defines the structure and function prototype used to parse shell command-line input.
+ */
+
+#define INPUT_LENGTH 2048  // Max length for a line of user input
+#define MAX_ARGS 512       // Max number of arguments a command can accept
 
 #include <stdbool.h>
 
+/**
+ * Represents a parsed command line with arguments, redirection, and background execution info.
+ */
 struct command_line {
-    char *argv[MAX_ARGS + 1]; // Array of command arguments, (with an extra cell for the NULL terminator)
-    int argc; // Arguments count from the argv array
-    char *input_file; // Name of the file for input redirection ("< input.txt").
-    char *output_file; // Name of the file for output redirection ("> output.txt").
-    bool is_bg; // Flag indicating if the command should run in the background (true if '&' is present).
+    char *argv[MAX_ARGS + 1];  // Array of argument strings (NULL-terminated)
+    int argc;                  // Number of arguments in argv
+    char *input_file;          // Input redirection file (e.g., "< input.txt")
+    char *output_file;         // Output redirection file (e.g., "> output.txt")
+    bool is_bg;                // True if command ends with '&' (background execution)
 };
 
-// Function Declaration
+// Parses a line of user input into a command_line structure
 struct command_line *parse_input();
 
 #endif
